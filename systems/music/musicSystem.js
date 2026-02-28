@@ -771,8 +771,9 @@ function initMusicSystem(client, config, panel) {
     console.log('[music] cookie load failed (play-dl)');
   }
 
-  writeNetscapeCookiesTxtFromEditThisCookieJson(config.youtubeCookiesFile, YTDLP_COOKIES_TXT);
-
+  if (!fs.existsSync(YTDLP_COOKIES_TXT)) {
+    writeNetscapeCookiesTxtFromEditThisCookieJson(config.youtubeCookiesFile, YTDLP_COOKIES_TXT);
+  }
   // client.music API
   client.music = {
     states,
@@ -878,8 +879,10 @@ function initMusicSystem(client, config, panel) {
 
   client.once(Events.ClientReady, async () => {
     cleanupPlayerScriptsOnce();
-    writeNetscapeCookiesTxtFromEditThisCookieJson(config.youtubeCookiesFile, YTDLP_COOKIES_TXT);
-
+    
+if (!fs.existsSync(YTDLP_COOKIES_TXT)) {
+  writeNetscapeCookiesTxtFromEditThisCookieJson(config.youtubeCookiesFile, YTDLP_COOKIES_TXT);
+}
     for (const [guildId] of client.guilds.cache) {
       await client.music.ensurePanelMessage(guildId);
     }
