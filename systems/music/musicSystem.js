@@ -144,6 +144,22 @@ const YTDLP_PATH = (() => {
 })();
 
 const YTDLP_COOKIES_TXT = path.join(ROOT_DIR, 'cookies.txt');
+function getRuntimeCookiesPath() {
+  const tmp = path.join(ROOT_DIR, 'cookies.runtime.txt');
+
+  try {
+    if (fs.existsSync(YTDLP_COOKIES_TXT)) {
+      fs.copyFileSync(YTDLP_COOKIES_TXT, tmp);
+      try { fs.chmodSync(tmp, 0o600); } catch {}
+      return tmp;
+    }
+  } catch {}
+
+  return null;
+}
+function cleanupRuntimeCookies(tmpPath) {
+  try { if (tmpPath && fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
+}
 const HAS_DENO = (() => {
   try {
     const r = spawnSync('deno', ['--version'], { stdio: 'ignore' });
@@ -162,8 +178,9 @@ function ytDlpGetInfo(urlOrSearch) {
 
     if (HAS_DENO) args.unshift('--js-runtimes', 'deno');
 
-    if (fs.existsSync(YTDLP_COOKIES_TXT)) {
-      args.push('--cookies', YTDLP_COOKIES_TXT);
+    const runtimeCookies = getRuntimeCookiesPath();
+    if (runtimeCookies) {
+      args.push('--cookies', runtimeCookies);
     }
 
     args.push(urlOrSearch);
@@ -181,8 +198,12 @@ function ytDlpGetInfo(urlOrSearch) {
       if (err.length > 5 * 1024 * 1024) p.kill('SIGKILL');
     });
 
-    p.on('error', (e) => reject(e));
+    p.on('error', (e) => {
+      cleanupRuntimeCookies(runtimeCookies);
+      reject(e);
+    });
     p.on('close', (code) => {
+      cleanupRuntimeCookies(runtimeCookies);
       if (code !== 0) {
         return reject(new Error((err || out || '').trim() || `yt-dlp exited with ${code}`));
       }
@@ -440,8 +461,9 @@ function ytDlpStream(url) {
       '--socket-timeout', '10',
     ];
 
-    if (fs.existsSync(YTDLP_COOKIES_TXT)) {
-      args.push('--cookies', YTDLP_COOKIES_TXT);
+    const runtimeCookies = getRuntimeCookiesPath();
+    if (runtimeCookies) {
+      args.push('--cookies', runtimeCookies);
     }
 
     args.push(url);
@@ -458,8 +480,12 @@ function ytDlpStream(url) {
 
     let err = '';
     p.stderr.on('data', (d) => { err += d.toString(); });
-    p.on('error', (e) => reject(e));
+    p.on('error', (e) => {
+      cleanupRuntimeCookies(runtimeCookies);
+      reject(e);
+    });
     p.on('close', (code) => {
+      cleanupRuntimeCookies(runtimeCookies);
       if (!started && code !== 0) {
         reject(new Error(err || `yt-dlp exited with ${code}`));
       }
@@ -772,7 +798,7 @@ function initMusicSystem(client, config, panel) {
     console.log('[music] cookie load failed (play-dl)');
   }
 
-  if (!fs.existsSync(YTDLP_COOKIES_TXT)) {
+  if (!fs.existsSync(YTDLP_COOKIES_TXT) && config.youtubeCookiesFile) {
     writeNetscapeCookiesTxtFromEditThisCookieJson(config.youtubeCookiesFile, YTDLP_COOKIES_TXT);
   }
   // client.music API
@@ -880,10 +906,6 @@ function initMusicSystem(client, config, panel) {
 
   client.once(Events.ClientReady, async () => {
     cleanupPlayerScriptsOnce();
-  
-    if (!fs.existsSync(YTDLP_COOKIES_TXT)) {
-      writeNetscapeCookiesTxtFromEditThisCookieJson(config.youtubeCookiesFile, YTDLP_COOKIES_TXT);
-    }
 
     for (const [guildId] of client.guilds.cache) {
       await client.music.ensurePanelMessage(guildId);
