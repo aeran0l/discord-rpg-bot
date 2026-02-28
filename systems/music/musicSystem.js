@@ -23,7 +23,8 @@ const {
   demuxProbe,
 } = require('@discordjs/voice');
 
-const OWNER_PL_FILE = path.join(process.cwd(), 'ownerPlaylist.json');
+const ROOT_DIR = path.resolve(__dirname, '..', '..');
+const OWNER_PL_FILE = path.join(ROOT_DIR, 'ownerPlaylist.json');
 
 // =========================
 // 튜닝 값
@@ -133,8 +134,8 @@ async function mapPool(items, limit, mapper) {
 
 // ===== yt-dlp path/cookies =====
 const YTDLP_PATH = (() => {
-  const localLinux = path.join(process.cwd(), 'bin', 'yt-dlp');
-  const localWin = path.join(process.cwd(), 'bin', 'yt-dlp.exe');
+  const localLinux = path.join(ROOT_DIR, 'bin', 'yt-dlp');
+  const localWin = path.join(ROOT_DIR, 'bin', 'yt-dlp.exe');
 
   if (fs.existsSync(localLinux)) return localLinux;
   if (fs.existsSync(localWin)) return localWin;
@@ -142,7 +143,7 @@ const YTDLP_PATH = (() => {
   return process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
 })();
 
-const YTDLP_COOKIES_TXT = path.join(process.cwd(), 'cookies.txt');
+const YTDLP_COOKIES_TXT = path.join(ROOT_DIR, 'cookies.txt');
 const HAS_DENO = (() => {
   try {
     const r = spawnSync('deno', ['--version'], { stdio: 'ignore' });
