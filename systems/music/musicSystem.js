@@ -582,7 +582,14 @@ async function playNext(client, guildId) {
     return;
   }
 
+  try {
   await playUrlOnPlayer(state, next.url);
+} catch (err) {
+  console.error('[music] play fail, skipping:', err?.message ?? err);
+
+  // 다음 곡으로 자동 스킵
+  return playNext(client, guildId);
+}
 
   // ✅ 새 곡 시작 기준점
   state.startedAt = Date.now();
