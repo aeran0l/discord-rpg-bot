@@ -1,7 +1,7 @@
 // systems/music/musicSystem.js
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const playdl = require('play-dl');
 const ffmpegPath = require('ffmpeg-static');
@@ -143,6 +143,62 @@ const YTDLP_PATH = (() => {
 })();
 
 const YTDLP_COOKIES_TXT = path.join(process.cwd(), 'cookies.txt');
+const HAS_DENO = (() => {
+  try {
+    const r = spawnSync('deno', ['--version'], { stdio: 'ignore' });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+})();
+
+function ytDlpGetInfo(urlOrSearch) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '--no-playlist',
+      '-J',
+    ];
+
+    if (HAS_DENO) args.unshift('--js-runtimes', 'deno');
+
+    if (fs.existsSync(YTDLP_COOKIES_TXT)) {
+      args.push('--cookies', YTDLP_COOKIES_TXT);
+    }
+
+    args.push(urlOrSearch);
+
+    const p = spawn(YTDLP_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    let out = '';
+    let err = '';
+    p.stdout.on('data', (d) => {
+      out += d.toString();
+      if (out.length > 20 * 1024 * 1024) p.kill('SIGKILL');
+    });
+    p.stderr.on('data', (d) => {
+      err += d.toString();
+      if (err.length > 5 * 1024 * 1024) p.kill('SIGKILL');
+    });
+
+    p.on('error', (e) => reject(e));
+    p.on('close', (code) => {
+      if (code !== 0) {
+        return reject(new Error((err || out || '').trim() || `yt-dlp exited with ${code}`));
+      }
+      try {
+        const j = JSON.parse(out);
+        const v = Array.isArray(j?.entries) ? j.entries[0] : j;
+        resolve({
+          title: safeString(v?.title) || '제목 없음',
+          webpage_url: safeString(v?.webpage_url) || safeString(v?.original_url) || safeString(urlOrSearch),
+          duration: (typeof v?.duration === 'number') ? v.duration : null,
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
 
 function writeNetscapeCookiesTxtFromEditThisCookieJson(jsonPath, outPath) {
   try {
@@ -304,41 +360,33 @@ async function resolveToSong(inputText) {
 
   const normalized = normalizeYouTubeUrl(raw);
 
-  // ✅ URL이면: 제목/길이까지 바로 조회해서 제한 적용
+  // ✅ URL이면: yt-dlp(쿠키/deno)로 제목/길이까지 조회해서 제한 적용
   if (isHttpUrl(normalized)) {
-    const info = await playdl.video_basic_info(normalized).catch((e) => {
+    const info = await ytDlpGetInfo(normalized).catch((e) => {
       throw new Error(`정보 불러오기 실패: ${e?.message ?? e}`);
     });
 
-    const title = safeString(info?.video_details?.title) || '제목 없음';
-    const url = safeString(info?.video_details?.url) || normalized;
+    const title = safeString(info?.title) || '제목 없음';
+    const url = safeString(info?.webpage_url) || normalized;
 
-    const dur = pickDurationSec(info);
+    const dur = (typeof info?.duration === 'number') ? info.duration : null;
     enforceDurationLimit(dur);
 
     if (!isHttpUrl(url)) throw new Error('Invalid URL');
     return { title, url, durationSec: dur ?? null, needsTitleFetch: false };
   }
 
-  // ✅ 검색이면: 결과 URL 뽑은 뒤 info로 길이 확인
-  const results = await playdl.search(normalized, { limit: 1 }).catch((e) => {
+  // ✅ 검색이면: yt-dlp ytsearch로 1개 뽑고 길이 확인
+  const info = await ytDlpGetInfo(`ytsearch1:${normalized}`).catch((e) => {
     throw new Error(`검색 실패: ${e?.message ?? e}`);
   });
-  if (!results || results.length === 0) throw new Error('검색 결과가 없어요!');
 
-  const r0 = results[0];
-  const title = safeString(r0?.title) || normalized;
+  const title = safeString(info?.title) || normalized;
+  const url = safeString(info?.webpage_url);
+  const dur = (typeof info?.duration === 'number') ? info.duration : null;
 
-  let url = safeString(r0?.url) || safeString(r0?.permalink);
-  if (!url) {
-    const id = safeString(r0?.id) || safeString(r0?.videoId);
-    if (id) url = makeWatchUrl(id);
-  }
-  if (!isHttpUrl(url)) throw new Error('Invalid URL');
-
-  const info = await playdl.video_basic_info(url).catch(() => null);
-  const dur = pickDurationSec(info);
   enforceDurationLimit(dur);
+  if (!isHttpUrl(url)) throw new Error('Invalid URL');
 
   return { title, url, durationSec: dur ?? null, needsTitleFetch: false };
 }
@@ -350,10 +398,10 @@ function scheduleTitleFetch(client, guildId, item, updatePanel) {
   if (!item?.url) return;
   item.needsTitleFetch = false;
 
-  playdl.video_basic_info(item.url)
+  ytDlpGetInfo(item.url)
     .then((info) => {
-      const t = safeString(info?.video_details?.title);
-      const u = safeString(info?.video_details?.url);
+      const t = safeString(info?.title);
+      const u = safeString(info?.webpage_url);
       if (t) item.title = t;
       if (u && isHttpUrl(u)) item.url = u;
       updatePanel(guildId).catch(() => {});
@@ -382,6 +430,7 @@ async function prefetchNext(state) {
 function ytDlpStream(url) {
   return new Promise((resolve, reject) => {
     const args = [
+      ...(HAS_DENO ? ['--js-runtimes', 'deno'] : []),
       '-f', 'ba',
       '-o', '-',
       '--no-playlist',
@@ -396,20 +445,23 @@ function ytDlpStream(url) {
 
     args.push(url);
 
-    const p = spawn(YTDLP_PATH, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
+    const p = spawn(YTDLP_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    let started = false;
+    p.stdout.on('data', () => {
+      if (!started) {
+        started = true;
+        resolve({ stream: p.stdout, type: 'opus' });
+      }
     });
 
-    let errBuf = '';
-    p.stderr.on('data', (d) => (errBuf += d.toString()));
-
-    p.on('error', (e) => reject(new Error(`yt-dlp 실행 실패: ${e.message}`)));
-
-    p.stdout.once('readable', () => resolve({ stream: p.stdout, process: p }));
-
+    let err = '';
+    p.stderr.on('data', (d) => { err += d.toString(); });
+    p.on('error', (e) => reject(e));
     p.on('close', (code) => {
-      if (code !== 0) reject(new Error(`yt-dlp 종료(code=${code}): ${errBuf.slice(0, 500)}`));
+      if (!started && code !== 0) {
+        reject(new Error(err || `yt-dlp exited with ${code}`));
+      }
     });
   });
 }
