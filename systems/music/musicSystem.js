@@ -241,9 +241,9 @@ function writeNetscapeCookiesTxtFromEditThisCookieJson(jsonPath, outPath) {
 
 function cleanupPlayerScriptsOnce() {
   try {
-    const files = fs.readdirSync(process.cwd());
+    const files = fs.readdirSync(ROOT_DIR);
     for (const f of files) {
-      if (/-player-script\.js$/i.test(f)) fs.unlinkSync(path.join(process.cwd(), f));
+      if (/-player-script\.js$/i.test(f)) fs.unlinkSync(path.join(ROOT_DIR, f));
     }
   } catch {}
 }
@@ -880,10 +880,11 @@ function initMusicSystem(client, config, panel) {
 
   client.once(Events.ClientReady, async () => {
     cleanupPlayerScriptsOnce();
-    
-if (!fs.existsSync(YTDLP_COOKIES_TXT)) {
-  writeNetscapeCookiesTxtFromEditThisCookieJson(config.youtubeCookiesFile, YTDLP_COOKIES_TXT);
-}
+  
+    if (!fs.existsSync(YTDLP_COOKIES_TXT)) {
+      writeNetscapeCookiesTxtFromEditThisCookieJson(config.youtubeCookiesFile, YTDLP_COOKIES_TXT);
+    }
+
     for (const [guildId] of client.guilds.cache) {
       await client.music.ensurePanelMessage(guildId);
     }
